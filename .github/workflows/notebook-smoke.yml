@@ -1,0 +1,46 @@
+name: Notebook smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notebook-smoke:
+    name: notebook-smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate notebooks
+        run: |
+          python - <<'PY'
+          import ast
+          import json
+          from pathlib import Path
+
+          notebooks = sorted(Path(".").glob("*.ipynb"))
+          if not notebooks:
+              raise SystemExit("No notebooks found")
+
+          for notebook in notebooks:
+              data = json.loads(notebook.read_text(encoding="utf-8"))
+              for index, cell in enumerate(data.get("cells", []), start=1):
+                  if cell.get("cell_type") != "code":
+                      continue
+
+                  source = "".join(cell.get("source") or [])
+                  ast.parse(source or "\n", filename=f"{notebook}#cell-{index}")
+          PY
