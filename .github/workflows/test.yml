@@ -1,0 +1,38 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate notebook and requirements metadata
+        run: |
+          python -m json.tool WSP_2V4.ipynb >/dev/null
+          python - <<'PY'
+          from pathlib import Path
+
+          reqs = Path("requirements.txt").read_text().splitlines()
+          invalid = [
+              line for line in reqs
+              if line.strip()
+              and not line.startswith("#")
+              and "==" not in line
+          ]
+          if invalid:
+              raise SystemExit(
+                  "requirements.txt should keep pinned dependencies; "
+                  f"found unpinned lines: {invalid}"
+              )
+          PY
