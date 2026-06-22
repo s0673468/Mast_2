@@ -1,0 +1,54 @@
+name: Static smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  static-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate notebook and requirements
+        run: |
+          python - <<'PY'
+          import ast
+          import json
+          from pathlib import Path
+
+          notebook = Path("WSP_2V4.ipynb")
+          data = json.loads(notebook.read_text(encoding="utf-8"))
+          if data.get("nbformat") != 4:
+              raise SystemExit(f"unexpected notebook format: {data.get('nbformat')}")
+          cells = data.get("cells")
+          if not isinstance(cells, list) or not cells:
+              raise SystemExit("notebook has no cells")
+          for index, cell in enumerate(cells, start=1):
+              if "cell_type" not in cell:
+                  raise SystemExit(f"cell {index} is missing cell_type")
+              if cell.get("cell_type") == "code":
+                  source = cell.get("source", "")
+                  if isinstance(source, list):
+                      source = "".join(source)
+                  ast.parse(source or "\n", filename=f"{notebook}:cell-{index}")
+
+          requirements = Path("requirements.txt").read_text(encoding="utf-8").splitlines()
+          pinned = [line for line in requirements if line.strip() and not line.lstrip().startswith("#")]
+          if not pinned:
+              raise SystemExit("requirements.txt has no dependencies")
+          for line in pinned:
+              if "==" not in line:
+                  raise SystemExit(f"dependency is not pinned: {line}")
+          PY
