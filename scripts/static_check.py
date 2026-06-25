@@ -31,9 +31,9 @@ def notebook_source(source: str | list[str]) -> str:
     if isinstance(source, list):
         source = "".join(source)
     lines = str(source).splitlines()
-    first = next((line.lstrip() for line in lines if line.strip()), "")
-    if first.startswith("%%"):
-        return ""
+    first_index = next((idx for idx, line in enumerate(lines) if line.strip()), None)
+    if first_index is not None and lines[first_index].lstrip().startswith("%%"):
+        lines = lines[:first_index] + lines[first_index + 1:]
 
     cleaned: list[str] = []
     for line in lines:
@@ -68,8 +68,11 @@ def check_notebook(path: Path) -> None:
             ast.parse(source, filename=f"{path.relative_to(ROOT)}:cell-{index}")
 
 
-def check_requirements(require_pinned: bool) -> None:
-    for path in iter_paths("requirements*.txt"):
+def check_requirements(require_pinned: bool, require_any: bool) -> None:
+    paths = iter_paths("requirements*.txt")
+    if require_any and not paths:
+        raise ValueError("no requirements*.txt file found")
+    for path in paths:
         deps = [
             line.strip()
             for line in path.read_text(encoding="utf-8").splitlines()
@@ -86,6 +89,9 @@ def check_requirements(require_pinned: bool) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--require-pinned-requirements", action="store_true")
+    parser.add_argument("--require-notebook", action="store_true")
+    parser.add_argument("--required-notebook", action="append", default=[])
+    parser.add_argument("--required-requirements", action="append", default=[])
     args = parser.parse_args()
 
     failures: list[str] = []
@@ -94,13 +100,25 @@ def main() -> int:
             check_python(path)
         except Exception as exc:  # noqa: BLE001 - concise lint report
             failures.append(f"{path.relative_to(ROOT)}: {exc}")
-    for path in iter_paths("*.ipynb"):
+    notebooks = iter_paths("*.ipynb")
+    for required in args.required_notebook:
+        if not (ROOT / required).is_file():
+            failures.append(f"{required} is missing")
+    if args.require_notebook and not notebooks:
+        failures.append("no notebooks found")
+    for path in notebooks:
         try:
             check_notebook(path)
         except Exception as exc:  # noqa: BLE001 - concise lint report
             failures.append(f"{path.relative_to(ROOT)}: {exc}")
     try:
-        check_requirements(args.require_pinned_requirements)
+        for required in args.required_requirements:
+            if not (ROOT / required).is_file():
+                failures.append(f"{required} is missing")
+        check_requirements(
+            args.require_pinned_requirements,
+            bool(args.required_requirements),
+        )
     except Exception as exc:  # noqa: BLE001 - concise lint report
         failures.append(str(exc))
 
