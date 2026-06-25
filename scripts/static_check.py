@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import argparse
 import ast
+import fnmatch
 import json
+import os
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,11 +23,25 @@ SKIP_PARTS = {
 
 
 def iter_paths(pattern: str) -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     return sorted(
         path
-        for path in ROOT.rglob(pattern)
+        for rel_path in result.stdout.splitlines()
+        for path in [ROOT / rel_path]
+        if fnmatch.fnmatch(Path(rel_path).name, pattern)
+        if path.is_file()
         if not (set(path.relative_to(ROOT).parts) & SKIP_PARTS)
     )
+
+
+def normalize_required_path(path: str) -> str:
+    return os.path.normpath(path).replace(os.sep, "/")
 
 
 def notebook_source(source: str | list[str]) -> str:
@@ -47,15 +64,17 @@ def notebook_source(source: str | list[str]) -> str:
         if lowered.startswith(("pip install ", "python -m pip ", "conda install ")):
             continue
         cleaned.append(line)
-    return "\n".join(cleaned).strip() + "\n" if any(line.strip() for line in cleaned) else ""
+    text = "\n".join(cleaned)
+    return text.rstrip() + "\n" if text.strip() else ""
 
 
-def compile_source(source: str, filename: str) -> None:
+def compile_source(source: str, filename: str, *, allow_top_level_await: bool = False) -> None:
+    flags = ast.PyCF_ALLOW_TOP_LEVEL_AWAIT if allow_top_level_await else 0
     compile(
         source,
         filename,
         "exec",
-        flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
+        flags=flags,
         dont_inherit=True,
     )
 
@@ -78,7 +97,11 @@ def check_notebook(path: Path) -> None:
             continue
         source = notebook_source(cell.get("source", ""))
         if source:
-            compile_source(source, f"{path.relative_to(ROOT)}:cell-{index}")
+            compile_source(
+                source,
+                f"{path.relative_to(ROOT)}:cell-{index}",
+                allow_top_level_await=True,
+            )
 
 
 def check_requirements(require_pinned: bool, require_any: bool) -> None:
@@ -114,9 +137,13 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - concise lint report
             failures.append(f"{path.relative_to(ROOT)}: {exc}")
     notebooks = iter_paths("*.ipynb")
+    tracked_notebooks = {path.relative_to(ROOT).as_posix() for path in notebooks}
     for required in args.required_notebook:
-        if not (ROOT / required).is_file():
+        required_path = normalize_required_path(required)
+        if not (ROOT / required_path).is_file():
             failures.append(f"{required} is missing")
+        elif required_path not in tracked_notebooks:
+            failures.append(f"{required} is not tracked")
     if args.require_notebook and not notebooks:
         failures.append("no notebooks found")
     for path in notebooks:
@@ -125,9 +152,16 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - concise lint report
             failures.append(f"{path.relative_to(ROOT)}: {exc}")
     try:
+        tracked_requirements = {
+            path.relative_to(ROOT).as_posix()
+            for path in iter_paths("requirements*.txt")
+        }
         for required in args.required_requirements:
-            if not (ROOT / required).is_file():
+            required_path = normalize_required_path(required)
+            if not (ROOT / required_path).is_file():
                 failures.append(f"{required} is missing")
+            elif required_path not in tracked_requirements:
+                failures.append(f"{required} is not tracked")
         check_requirements(
             args.require_pinned_requirements,
             bool(args.required_requirements),
