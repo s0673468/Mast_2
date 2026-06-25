@@ -132,9 +132,12 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - concise lint report
             failures.append(f"{path.relative_to(ROOT)}: {exc}")
     notebooks = iter_paths("*.ipynb")
+    tracked_notebooks = {path.relative_to(ROOT).as_posix() for path in notebooks}
     for required in args.required_notebook:
         if not (ROOT / required).is_file():
             failures.append(f"{required} is missing")
+        elif required not in tracked_notebooks:
+            failures.append(f"{required} is not tracked")
     if args.require_notebook and not notebooks:
         failures.append("no notebooks found")
     for path in notebooks:
@@ -143,9 +146,15 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - concise lint report
             failures.append(f"{path.relative_to(ROOT)}: {exc}")
     try:
+        tracked_requirements = {
+            path.relative_to(ROOT).as_posix()
+            for path in iter_paths("requirements*.txt")
+        }
         for required in args.required_requirements:
             if not (ROOT / required).is_file():
                 failures.append(f"{required} is missing")
+            elif required not in tracked_requirements:
+                failures.append(f"{required} is not tracked")
         check_requirements(
             args.require_pinned_requirements,
             bool(args.required_requirements),
