@@ -5,6 +5,7 @@ import argparse
 import ast
 import fnmatch
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -37,6 +38,10 @@ def iter_paths(pattern: str) -> list[Path]:
         if path.is_file()
         if not (set(path.relative_to(ROOT).parts) & SKIP_PARTS)
     )
+
+
+def normalize_required_path(path: str) -> str:
+    return os.path.normpath(path).replace(os.sep, "/")
 
 
 def notebook_source(source: str | list[str]) -> str:
@@ -134,9 +139,10 @@ def main() -> int:
     notebooks = iter_paths("*.ipynb")
     tracked_notebooks = {path.relative_to(ROOT).as_posix() for path in notebooks}
     for required in args.required_notebook:
-        if not (ROOT / required).is_file():
+        required_path = normalize_required_path(required)
+        if not (ROOT / required_path).is_file():
             failures.append(f"{required} is missing")
-        elif required not in tracked_notebooks:
+        elif required_path not in tracked_notebooks:
             failures.append(f"{required} is not tracked")
     if args.require_notebook and not notebooks:
         failures.append("no notebooks found")
@@ -151,9 +157,10 @@ def main() -> int:
             for path in iter_paths("requirements*.txt")
         }
         for required in args.required_requirements:
-            if not (ROOT / required).is_file():
+            required_path = normalize_required_path(required)
+            if not (ROOT / required_path).is_file():
                 failures.append(f"{required} is missing")
-            elif required not in tracked_requirements:
+            elif required_path not in tracked_requirements:
                 failures.append(f"{required} is not tracked")
         check_requirements(
             args.require_pinned_requirements,
