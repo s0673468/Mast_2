@@ -33,6 +33,9 @@ def notebook_source(source: str | list[str]) -> str:
     lines = str(source).splitlines()
     first_index = next((idx for idx, line in enumerate(lines) if line.strip()), None)
     if first_index is not None and lines[first_index].lstrip().startswith("%%"):
+        magic = lines[first_index].lstrip()[2:].split(None, 1)[0]
+        if magic not in {"capture", "debug", "prun", "python", "python3", "time", "timeit"}:
+            return ""
         lines = lines[:first_index] + lines[first_index + 1:]
 
     cleaned: list[str] = []
@@ -47,8 +50,18 @@ def notebook_source(source: str | list[str]) -> str:
     return "\n".join(cleaned).strip() + "\n" if any(line.strip() for line in cleaned) else ""
 
 
+def compile_source(source: str, filename: str) -> None:
+    compile(
+        source,
+        filename,
+        "exec",
+        flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
+        dont_inherit=True,
+    )
+
+
 def check_python(path: Path) -> None:
-    ast.parse(path.read_text(encoding="utf-8"), filename=str(path.relative_to(ROOT)))
+    compile_source(path.read_text(encoding="utf-8"), str(path.relative_to(ROOT)))
 
 
 def check_notebook(path: Path) -> None:
@@ -65,7 +78,7 @@ def check_notebook(path: Path) -> None:
             continue
         source = notebook_source(cell.get("source", ""))
         if source:
-            ast.parse(source, filename=f"{path.relative_to(ROOT)}:cell-{index}")
+            compile_source(source, f"{path.relative_to(ROOT)}:cell-{index}")
 
 
 def check_requirements(require_pinned: bool, require_any: bool) -> None:
