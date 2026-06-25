@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import fnmatch
 import json
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,9 +22,19 @@ SKIP_PARTS = {
 
 
 def iter_paths(pattern: str) -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     return sorted(
         path
-        for path in ROOT.rglob(pattern)
+        for rel_path in result.stdout.splitlines()
+        for path in [ROOT / rel_path]
+        if fnmatch.fnmatch(Path(rel_path).name, pattern)
+        if path.is_file()
         if not (set(path.relative_to(ROOT).parts) & SKIP_PARTS)
     )
 
@@ -47,15 +59,17 @@ def notebook_source(source: str | list[str]) -> str:
         if lowered.startswith(("pip install ", "python -m pip ", "conda install ")):
             continue
         cleaned.append(line)
-    return "\n".join(cleaned).strip() + "\n" if any(line.strip() for line in cleaned) else ""
+    text = "\n".join(cleaned)
+    return text.rstrip() + "\n" if text.strip() else ""
 
 
-def compile_source(source: str, filename: str) -> None:
+def compile_source(source: str, filename: str, *, allow_top_level_await: bool = False) -> None:
+    flags = ast.PyCF_ALLOW_TOP_LEVEL_AWAIT if allow_top_level_await else 0
     compile(
         source,
         filename,
         "exec",
-        flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
+        flags=flags,
         dont_inherit=True,
     )
 
@@ -78,7 +92,11 @@ def check_notebook(path: Path) -> None:
             continue
         source = notebook_source(cell.get("source", ""))
         if source:
-            compile_source(source, f"{path.relative_to(ROOT)}:cell-{index}")
+            compile_source(
+                source,
+                f"{path.relative_to(ROOT)}:cell-{index}",
+                allow_top_level_await=True,
+            )
 
 
 def check_requirements(require_pinned: bool, require_any: bool) -> None:
